@@ -4,9 +4,22 @@
     <h3 class='site-header'>city roads</h3>
     <p class='description'>This website renders every single road within a city</p>
   </div>
-  <form v-on:submit.prevent="onSubmit" class='search-box'>
+  <div class='input-mode-toggle'>
+    <a href='#' @click.prevent='setInputMode("city")' :class='{active: inputMode === "city"}'>City Search</a>
+    <a href='#' @click.prevent='setInputMode("bbox")' :class='{active: inputMode === "bbox"}'>Bounding Box</a>
+  </div>
+  <form v-on:submit.prevent="onSubmit" class='search-box' v-if='inputMode === "city"'>
       <input class='query-input' v-model='enteredInput' type='text' placeholder='Enter a city name to start' ref='input'>
       <a type='submit' class='search-submit' href='#' @click.prevent='onSubmit' v-if='enteredInput && !hideInput'>{{mainActionText}}</a>
+  </form>
+  <form v-on:submit.prevent="onSubmit" class='bbox-form' v-if='inputMode === "bbox"'>
+    <div class='bbox-inputs'>
+      <input class='bbox-input' v-model='bboxSouth' type='text' placeholder='South Lat' ref='bboxSouthInput'>
+      <input class='bbox-input' v-model='bboxWest' type='text' placeholder='West Lon'>
+      <input class='bbox-input' v-model='bboxNorth' type='text' placeholder='North Lat'>
+      <input class='bbox-input' v-model='bboxEast' type='text' placeholder='East Lon'>
+    </div>
+    <a type='submit' class='search-submit' href='#' @click.prevent='onSubmit' v-if='hasBboxValues'>Load Area</a>
   </form>
   <div v-if='showWarning' class='prompt message note shadow'>
     Note: Large cities may require 200MB+ of data transfer and may need a powerful device to render.
@@ -84,6 +97,11 @@ export default {
 
     return {
       enteredInput,
+      inputMode: 'city', // 'city' or 'bbox'
+      bboxSouth: '',
+      bboxWest: '',
+      bboxNorth: '',
+      bboxEast: '',
       loading: null,
       lastCancel: null,
       suggestionsLoaded: false,
@@ -98,6 +116,11 @@ export default {
       suggestions: []
     }
   },
+  computed: {
+    hasBboxValues() {
+      return this.bboxSouth && this.bboxWest && this.bboxNorth && this.bboxEast;
+    }
+  },
   watch: {
     enteredInput() {
       // As soon as they change it, we need not to download:
@@ -108,7 +131,11 @@ export default {
     }
   },
   mounted() {
-    this.$refs.input.focus();
+    if (this.inputMode === 'city') {
+      this.$refs.input.focus();
+    } else if (this.inputMode === 'bbox' && this.$refs.bboxSouthInput) {
+      this.$refs.bboxSouthInput.focus();
+    }
     if (queryState.get('auto')) {
       this.onSubmit();
     }
@@ -118,7 +145,22 @@ export default {
     clearInterval(this.notifyStillLoading);
   },
   methods: {
+    setInputMode(mode) {
+      this.inputMode = mode;
+      this.$nextTick(() => {
+        if (mode === 'city' && this.$refs.input) {
+          this.$refs.input.focus();
+        } else if (mode === 'bbox' && this.$refs.bboxSouthInput) {
+          this.$refs.bboxSouthInput.focus();
+        }
+      });
+    },
     onSubmit() {
+      if (this.inputMode === 'bbox') {
+        this.submitBBox();
+        return;
+      }
+      
       queryState.set('q', this.enteredInput);
       this.cancelRequest()
       this.suggestions = [];
@@ -150,6 +192,44 @@ export default {
               this.suggestions = suggestions; 
           }
         });
+    },
+
+    submitBBox() {
+      const south = parseFloat(this.bboxSouth);
+      const west = parseFloat(this.bboxWest);
+      const north = parseFloat(this.bboxNorth);
+      const east = parseFloat(this.bboxEast);
+
+      // Validate bbox values
+      if (!Number.isFinite(south) || !Number.isFinite(west) || 
+          !Number.isFinite(north) || !Number.isFinite(east)) {
+        this.error = new Error('Invalid bounding box coordinates. Please enter valid numbers.');
+        return;
+      }
+
+      if (south >= north) {
+        this.error = new Error('South latitude must be less than North latitude.');
+        return;
+      }
+
+      if (west >= east) {
+        this.error = new Error('West longitude must be less than East longitude.');
+        return;
+      }
+
+      const bbox = [south, west, north, east];
+      const bboxName = `Area (${south.toFixed(2)}, ${west.toFixed(2)}, ${north.toFixed(2)}, ${east.toFixed(2)})`;
+      
+      this.cancelRequest();
+      this.suggestions = [];
+      this.noRoads = false;
+      this.error = false;
+      
+      this.pickSuggestion({
+        name: bboxName,
+        bbox: bbox,
+        osm_id: null
+      });
     },
 
     getBugReportURL(error) {
@@ -341,6 +421,68 @@ function parseBBox(bboxStr) {
 .find-place  {
   width: desktop-controls-width;
 }
+
+.input-mode-toggle {
+  display: flex;
+  background-color: emphasis-background;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  margin-bottom: 1px;
+  
+  a {
+    flex: 1;
+    padding: 8px;
+    text-align: center;
+    text-decoration: none;
+    color: #666;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    
+    &:hover {
+      background-color: rgba(0,0,0,0.05);
+    }
+    
+    &.active {
+      color: highlight-color;
+      border-bottom-color: highlight-color;
+      font-weight: 500;
+    }
+  }
+}
+
+.bbox-form {
+  position: relative;
+  background-color: emphasis-background;
+  padding: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2), 0 -1px 0px rgba(0,0,0,0.02);
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  
+  .bbox-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  
+  .bbox-input {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-family: 'Avenir', Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    
+    &:focus {
+      outline: none;
+      border-color: highlight-color;
+    }
+  }
+  
+  .search-submit {
+    align-self: flex-end;
+  }
+}
+
 
 h3.site-header {
   margin: 0;
