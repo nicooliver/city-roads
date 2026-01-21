@@ -200,10 +200,21 @@ export default {
       const north = parseFloat(this.bboxNorth);
       const east = parseFloat(this.bboxEast);
 
-      // Validate bbox values
+      // Validate bbox values are numbers
       if (!Number.isFinite(south) || !Number.isFinite(west) || 
           !Number.isFinite(north) || !Number.isFinite(east)) {
         this.error = new Error('Invalid bounding box coordinates. Please enter valid numbers.');
+        return;
+      }
+
+      // Validate coordinate ranges
+      if (south < -90 || south > 90 || north < -90 || north > 90) {
+        this.error = new Error('Latitude values must be between -90 and 90.');
+        return;
+      }
+
+      if (west < -180 || west > 180 || east < -180 || east > 180) {
+        this.error = new Error('Longitude values must be between -180 and 180.');
         return;
       }
 
@@ -212,11 +223,15 @@ export default {
         return;
       }
 
-      if (west >= east) {
-        this.error = new Error('West longitude must be less than East longitude.');
+      // For most cases, west should be less than east, unless crossing the date line
+      // We'll allow both cases but for simplicity, if west > east, we assume it crosses
+      // the date line (e.g., from 170 to -170)
+      if (west >= east && (east - west > -180)) {
+        this.error = new Error('West longitude must be less than East longitude (unless crossing the date line).');
         return;
       }
 
+      // bbox format: [south, west, north, east] - same as nominatim
       const bbox = [south, west, north, east];
       const bboxName = `Area (${south.toFixed(2)}, ${west.toFixed(2)}, ${north.toFixed(2)}, ${east.toFixed(2)})`;
       
